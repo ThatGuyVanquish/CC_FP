@@ -1,3 +1,5 @@
+#use "tp_sa.ml";;
+
 let file_to_string input_file =
   let in_channel = open_in input_file in
   let rec run () =
@@ -19,8 +21,9 @@ module type CODE_GENERATION =
     val compile_scheme_file : string -> string -> unit
   end;;
 
-module Code_Generation : CODE_GENERATION= struct
-
+module Code_Generation (*: CODE_GENERATION*)= struct
+  open Tag_Parser;;
+  open Semantic_Analysis;;
   (* areas that raise this exception are NOT for the
    * final project! please leave these unimplemented,
    * as this will require major additions to your
@@ -52,19 +55,40 @@ module Code_Generation : CODE_GENERATION= struct
     | [] -> []
     | s -> run (s, n, (fun s -> s));;
 
-  let remove_duplicates = raise X_not_yet_implemented;;
-
-  let collect_constants = raise X_not_yet_implemented;;
-
+  let rec remove_dupes dupeless = function
+    | first :: rest -> remove_dupes (dupeless @ [first]) 
+            (List.filter (fun val_in_list -> first != val_in_list) rest)
+    | x -> dupeless @ x
+    | [] -> dupeless
+    
+  let remove_duplicates = function 
+      | [] -> []
+      | lst -> remove_dupes [] lst;;
+  
+  let collect_constants = 
+    let rec collector = function (*raise (X_not_yet_implemented "collect_constants");;*)
+    | ScmConst' sexpr -> [sexpr]
+    | ScmVarGet' var' -> []
+    | ScmIf' (test, dit, dif) -> (collector test) @ (collector dit) @ (collector dif)
+    | ScmSeq' exprs' -> (List.fold_left (fun acc expr' -> (collector expr') @ acc) [] exprs')
+    | ScmOr' exprs' -> (List.fold_left (fun acc expr' -> (collector expr') @ acc) [] exprs')
+    | ScmVarSet' (_, expr') -> collector expr'
+    | ScmVarDef' (_, expr') -> collector expr'
+    | ScmBox' var' -> []
+    | ScmBoxGet' var' -> []
+    | ScmBoxSet' (_, expr') -> collector expr'
+    | ScmLambda' (_, _, expr') -> collector expr'
+    | ScmApplic' (expr', exprs', _) -> (collector expr') @ (List.fold_left (fun acc expr' -> (collector expr') @ acc) [] exprs')
+  in collector;;
+    
   let add_sub_constants =
     let rec run sexpr = match sexpr with
-      | ScmVoid -> raise X_not_yet_implemented
-      | ScmNil -> raise X_not_yet_implemented
-      | ScmBoolean _ | ScmChar _ | ScmString _ | ScmNumber _ ->
-         raise X_not_yet_implemented
-      | ScmSymbol sym -> raise X_not_yet_implemented
+      | ScmVoid -> [ScmVoid]
+      | ScmNil -> [ScmNil]
+      | ScmBoolean _ | ScmChar _ | ScmString _ | ScmNumber _ as scmObj-> [scmObj]
+      | ScmSymbol sym -> [ScmString sym; ScmSymbol sym]
       | ScmPair (car, cdr) -> (run car) @ (run cdr) @ [sexpr]
-      | ScmVector sexprs -> raise X_not_yet_implemented
+      | ScmVector sexprs -> List.fold_left (fun acc sexpr -> (run sexpr) @ acc) [ScmVector sexprs] sexprs
     and runs sexprs =
       List.fold_left (fun full sexpr -> full @ (run sexpr)) [] sexprs
     in fun exprs' ->
@@ -78,7 +102,13 @@ module Code_Generation : CODE_GENERATION= struct
     | QuadFloat of float
     | ConstPtr of int;;
 
-  let search_constant_address = raise X_not_yet_implemented;;
+  let search_constant_address = 
+    let find_address const_to_find table = 
+      let (sexpr, loc, repr) as const = List.find_opt (fun (sexpr, loc, repr) -> 
+        sexpr == const_to_find) table in 
+      if (const == None) 
+        then raise (X_this_should_not_happen "Couldn't find constant in const table")
+        else loc
 
   let const_repr sexpr loc table = match sexpr with
     | ScmVoid -> ([RTTI "T_void"], 1)
@@ -262,24 +292,24 @@ module Code_Generation : CODE_GENERATION= struct
 
   let collect_free_vars =
     let rec run = function
-      | ScmConst' _ -> raise X_not_yet_implemented
+      | ScmConst' _ -> []
       | ScmVarGet' (Var' (v, Free)) -> [v]
-      | ScmVarGet' _ -> raise X_not_yet_implemented
-      | ScmIf' (test, dit, dif) -> raise X_not_yet_implemented
+      | ScmVarGet' _ -> raise (X_not_yet_implemented "collect_free_vars scmvarget")
+      | ScmIf' (test, dit, dif) -> raise (X_not_yet_implemented "collect_free_vars scmif")
       | ScmSeq' exprs' -> runs exprs'
       | ScmOr' exprs' -> runs exprs'
-      | ScmVarSet' (Var' (v, Free), expr') -> raise X_not_yet_implemented
-      | ScmVarSet' (_, expr') -> raise X_not_yet_implemented
-      | ScmVarDef' (Var' (v, Free), expr') -> raise X_not_yet_implemented
+      | ScmVarSet' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvarset1")
+      | ScmVarSet' (_, expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvarset2")
+      | ScmVarDef' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvardef")
       | ScmVarDef' (_, expr') -> run expr'
-      | ScmBox' (Var' (v, Free)) -> raise X_not_yet_implemented
+      | ScmBox' (Var' (v, Free)) -> raise (X_not_yet_implemented "collect_free_vars Scmbox")
       | ScmBox' _ -> []
-      | ScmBoxGet' (Var' (v, Free)) -> raise X_not_yet_implemented
+      | ScmBoxGet' (Var' (v, Free)) -> raise (X_not_yet_implemented "collect_free_vars Scmboxget")
       | ScmBoxGet' _ -> []
-      | ScmBoxSet' (Var' (v, Free), expr') -> raise X_not_yet_implemented
+      | ScmBoxSet' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmboxset")
       | ScmBoxSet' (_, expr') -> run expr'
-      | ScmLambda' (_, _, expr') -> raise X_not_yet_implemented
-      | ScmApplic' (expr', exprs', _) -> raise X_not_yet_implemented
+      | ScmLambda' (_, _, expr') -> raise (X_not_yet_implemented "collect_free_vars Scmlambda")
+      | ScmApplic' (expr', exprs', _) -> raise (X_not_yet_implemented "collect_free_vars Scmapplic")
     and runs exprs' =
       List.fold_left
         (fun vars expr' -> vars @ (run expr'))
@@ -383,16 +413,16 @@ module Code_Generation : CODE_GENERATION= struct
     let consts = make_constants_table exprs' in
     let free_vars = make_free_vars_table exprs' in
     let rec run params env = function
-      | ScmConst' sexpr -> raise X_not_yet_implemented
+      | ScmConst' sexpr -> raise (X_not_yet_implemented "code_gen scmconst")
       | ScmVarGet' (Var' (v, Free)) ->
          let label = search_free_var_table v free_vars in
          Printf.sprintf
            "\tmov rax, qword [%s]\n"
            label
-      | ScmVarGet' (Var' (v, Param minor)) -> raise X_not_yet_implemented
+      | ScmVarGet' (Var' (v, Param minor)) -> raise (X_not_yet_implemented "code_gen scmconst")
       | ScmVarGet' (Var' (v, Bound (major, minor))) ->
-         raise X_not_yet_implemented
-      | ScmIf' (test, dit, dif) -> raise X_not_yet_implemented
+         raise (X_not_yet_implemented "code_gen scmvarget")
+      | ScmIf' (test, dit, dif) -> raise (X_not_yet_implemented "code_gen scmif")
       | ScmSeq' exprs' ->
          String.concat "\n"
            (List.map (run params env) exprs')
@@ -418,11 +448,11 @@ module Code_Generation : CODE_GENERATION= struct
             | None -> run params env (ScmConst' (ScmBoolean false)))
          in asm_code
       | ScmVarSet' (Var' (v, Free), expr') ->
-         raise X_not_yet_implemented
+         raise (X_not_yet_implemented "code_gen scmvarset1")
       | ScmVarSet' (Var' (v, Param minor), expr') ->
-         raise X_not_yet_implemented
+         raise (X_not_yet_implemented "code_gen scmvarset2")
       | ScmVarSet' (Var' (v, Bound (major, minor)), expr') ->
-         raise X_not_yet_implemented
+         raise (X_not_yet_implemented "code_gen scmvarset3")
       | ScmVarDef' (Var' (v, Free), expr') ->
          let label = search_free_var_table v free_vars in
          (run params env expr')
@@ -432,12 +462,12 @@ module Code_Generation : CODE_GENERATION= struct
          raise X_not_yet_supported
       | ScmVarDef' (Var' (v, Bound (major, minor)), expr') ->
          raise X_not_yet_supported
-      | ScmBox' (Var' (v, Param minor)) -> raise X_not_yet_implemented
-      | ScmBox' _ -> raise X_not_yet_implemented
+      | ScmBox' (Var' (v, Param minor)) -> raise (X_not_yet_implemented "code_gen scmbox")
+      | ScmBox' _ -> raise (X_not_yet_implemented "code_gen scmbox2")
       | ScmBoxGet' var' ->
          (run params env (ScmVarGet' var'))
          ^ "\tmov rax, qword [rax]\n"
-      | ScmBoxSet' (var', expr') -> raise X_not_yet_implemented
+      | ScmBoxSet' (var', expr') -> raise (X_not_yet_implemented "code_gen scmboxset")
       | ScmLambda' (params', Simple, body) ->
          let label_loop_env = make_lambda_simple_loop_env ()
          and label_loop_env_end = make_lambda_simple_loop_env_end ()
@@ -498,9 +528,9 @@ module Code_Generation : CODE_GENERATION= struct
          ^ "\tleave\n"
          ^ (Printf.sprintf "\tret 8 * (2 + %d)\n" (List.length params'))
          ^ (Printf.sprintf "%s:\t; new closure is in rax\n" label_end)
-      | ScmLambda' (params', Opt opt, body) -> raise X_not_yet_implemented
-      | ScmApplic' (proc, args, Non_Tail_Call) -> raise X_not_yet_implemented
-      | ScmApplic' (proc, args, Tail_Call) -> raise X_not_yet_implemented
+      | ScmLambda' (params', Opt opt, body) -> raise (X_not_yet_implemented "code_gen scmlambda")
+      | ScmApplic' (proc, args, Non_Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic")
+      | ScmApplic' (proc, args, Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic2")
     and runs params env exprs' =
       List.map
         (fun expr' ->
