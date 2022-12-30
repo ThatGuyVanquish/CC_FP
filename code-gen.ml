@@ -59,14 +59,13 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     | first :: rest -> remove_dupes (dupeless @ [first]) 
             (List.filter (fun val_in_list -> first != val_in_list) rest)
     | x -> dupeless @ x
-    | [] -> dupeless
     
   let remove_duplicates = function 
       | [] -> []
       | lst -> remove_dupes [] lst;;
   
   let collect_constants = 
-    let rec collector = function (*raise (X_not_yet_implemented "collect_constants");;*)
+    let rec collector = function
     | ScmConst' sexpr -> [sexpr]
     | ScmVarGet' var' -> []
     | ScmIf' (test, dit, dif) -> (collector test) @ (collector dit) @ (collector dif)
@@ -79,7 +78,8 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     | ScmBoxSet' (_, expr') -> collector expr'
     | ScmLambda' (_, _, expr') -> collector expr'
     | ScmApplic' (expr', exprs', _) -> (collector expr') @ (List.fold_left (fun acc expr' -> (collector expr') @ acc) [] exprs')
-  in collector;;
+  in fun exprs' ->
+    List.fold_left (fun acc expr' -> acc @ (collector expr')) [] exprs';;
     
   let add_sub_constants =
     let rec run sexpr = match sexpr with
@@ -104,11 +104,10 @@ module Code_Generation (*: CODE_GENERATION*)= struct
 
   let search_constant_address = 
     let find_address const_to_find table = 
-      let (sexpr, loc, repr) as const = List.find_opt (fun (sexpr, loc, repr) -> 
-        sexpr == const_to_find) table in 
-      if (const == None) 
-        then raise (X_this_should_not_happen "Couldn't find constant in const table")
-        else loc
+      match List.find_opt(fun (sexpr, loc, repr) -> sexpr == const_to_find) table with
+        | Some (_, loc, _) -> loc
+        | _ -> raise (X_this_should_not_happen "NO GOD! NO GOD PLEASE NO! NO! NO! NOOOOOOOOOO!")
+      in find_address
 
   let const_repr sexpr loc table = match sexpr with
     | ScmVoid -> ([RTTI "T_void"], 1)
@@ -294,22 +293,22 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     let rec run = function
       | ScmConst' _ -> []
       | ScmVarGet' (Var' (v, Free)) -> [v]
-      | ScmVarGet' _ -> raise (X_not_yet_implemented "collect_free_vars scmvarget")
-      | ScmIf' (test, dit, dif) -> raise (X_not_yet_implemented "collect_free_vars scmif")
+      | ScmVarGet' _ -> []
+      | ScmIf' (test, dit, dif) -> (run test) @ (run dit) @ (run dif)
       | ScmSeq' exprs' -> runs exprs'
       | ScmOr' exprs' -> runs exprs'
-      | ScmVarSet' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvarset1")
-      | ScmVarSet' (_, expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvarset2")
-      | ScmVarDef' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmvardef")
+      | ScmVarSet' (Var' (v, Free), expr') -> [v] @ (run expr')
+      | ScmVarSet' (_, expr') -> run expr'
+      | ScmVarDef' (Var' (v, Free), expr') -> [v] @ (run expr')
       | ScmVarDef' (_, expr') -> run expr'
-      | ScmBox' (Var' (v, Free)) -> raise (X_not_yet_implemented "collect_free_vars Scmbox")
+      | ScmBox' (Var' (v, Free)) -> [v]
       | ScmBox' _ -> []
-      | ScmBoxGet' (Var' (v, Free)) -> raise (X_not_yet_implemented "collect_free_vars Scmboxget")
+      | ScmBoxGet' (Var' (v, Free)) -> [v]
       | ScmBoxGet' _ -> []
-      | ScmBoxSet' (Var' (v, Free), expr') -> raise (X_not_yet_implemented "collect_free_vars Scmboxset")
+      | ScmBoxSet' (Var' (v, Free), expr') -> [v] @ (run expr')
       | ScmBoxSet' (_, expr') -> run expr'
-      | ScmLambda' (_, _, expr') -> raise (X_not_yet_implemented "collect_free_vars Scmlambda")
-      | ScmApplic' (expr', exprs', _) -> raise (X_not_yet_implemented "collect_free_vars Scmapplic")
+      | ScmLambda' (_, _, expr') -> run expr'
+      | ScmApplic' (expr', exprs', _) -> (run expr') @ (runs exprs')
     and runs exprs' =
       List.fold_left
         (fun vars expr' -> vars @ (run expr'))
@@ -413,16 +412,33 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     let consts = make_constants_table exprs' in
     let free_vars = make_free_vars_table exprs' in
     let rec run params env = function
-      | ScmConst' sexpr -> raise (X_not_yet_implemented "code_gen scmconst")
+      | ScmConst' sexpr -> 
+         let label = search_constant_address sexpr consts in
+         Printf.sprintf
+          "\tmov rax, %d ;'Moshe was in: ScmConst' sexpr\n"
+          label
       | ScmVarGet' (Var' (v, Free)) ->
          let label = search_free_var_table v free_vars in
          Printf.sprintf
            "\tmov rax, qword [%s]\n"
            label
-      | ScmVarGet' (Var' (v, Param minor)) -> raise (X_not_yet_implemented "code_gen scmconst")
+      | ScmVarGet' (Var' (v, Param minor)) ->
+         Printf.sprintf 
+          "\tmov rax, qword [rbp + 8 * (4 + %d)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))\n"
+          minor
       | ScmVarGet' (Var' (v, Bound (major, minor))) ->
-         raise (X_not_yet_implemented "code_gen scmvarget")
-      | ScmIf' (test, dit, dif) -> raise (X_not_yet_implemented "code_gen scmif")
+         "\tmov rax, qword [rbp + 8 * 2] ;'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n"
+         ^(Printf.sprintf "\tmov rax, qword [rax + 8 * %d];'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n" major)
+         ^(Printf.sprintf "\tmov rax, qword [rax + 8 * %d];'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n" minor)
+      | ScmIf' (test, dit, dif) -> (*???? maybe need to add index to labels*)
+        (run params env test) 
+        ^"cmp rax, sob_false;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^"je Lelse;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^(run params env dit)
+        ^"jmp Lexit;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^"Lelse:;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^(run params env dif)
+        ^"Lexit:;'Moshe was in: ScmIf' (test, dit, dif);\n"
       | ScmSeq' exprs' ->
          String.concat "\n"
            (List.map (run params env) exprs')
@@ -448,11 +464,20 @@ module Code_Generation (*: CODE_GENERATION*)= struct
             | None -> run params env (ScmConst' (ScmBoolean false)))
          in asm_code
       | ScmVarSet' (Var' (v, Free), expr') ->
-         raise (X_not_yet_implemented "code_gen scmvarset1")
+         let free_var_v = search_free_var_table v free_vars in
+         (run params env expr') 
+        ^(Printf.sprintf "\tmov qword [%s], rax;'Moshe was in: ScmVarSet' (Var' (v, Free), expr')\n" free_var_v)
+        ^"mov rax, sob_void;'Moshe was in: ScmVarSet' (Var' (v, Free), expr')\n"
       | ScmVarSet' (Var' (v, Param minor), expr') ->
-         raise (X_not_yet_implemented "code_gen scmvarset2")
+         (run params env expr')
+         ^(Printf.sprintf "\tmov qword [rbp + 8 * (4 + %d)], rax ;'Moshe was in: ScmVarSet' (Var' (v, Param minor), expr')\n" minor)
+         ^"\tmov rax, sob_void ;'Moshe was in: ScmVarSet' (Var' (v, Param minor), expr')\n"
       | ScmVarSet' (Var' (v, Bound (major, minor)), expr') ->
-         raise (X_not_yet_implemented "code_gen scmvarset3")
+         (run params env expr')
+         ^"\tmov rbx, qword [rbp + 8 * 2] ;'Moshe was in: ScmVarSet' (Var' (v, Bound (major, minor)), expr')\n"
+         ^(Printf.sprintf "\tmov rbx, qword [rbx + 8 * %d] ;'Moshe was in: ScmVarSet' (Var' (v, Bound (major, minor)), expr')\n" major)
+         ^(Printf.sprintf "\tmov qword [rbx + 8 * %d], rax ;'Moshe was in: ScmVarSet' (Var' (v, Bound (major, minor)), expr')\n" minor)
+         ^"\tmov rax, sob_void ;'Moshe was in: ScmVarSet' (Var' (v, Bound (major, minor)), expr')\n"
       | ScmVarDef' (Var' (v, Free), expr') ->
          let label = search_free_var_table v free_vars in
          (run params env expr')
@@ -467,7 +492,12 @@ module Code_Generation (*: CODE_GENERATION*)= struct
       | ScmBoxGet' var' ->
          (run params env (ScmVarGet' var'))
          ^ "\tmov rax, qword [rax]\n"
-      | ScmBoxSet' (var', expr') -> raise (X_not_yet_implemented "code_gen scmboxset")
+      | ScmBoxSet' (var', expr') -> 
+        (run params env expr')
+        ^"push rax;'Moshe was in: ScmBoxSet' (var', expr')\n"
+        ^(run params env (ScmVarGet' var'))
+        ^"pop qword [rax];'Moshe was in: ScmBoxSet' (var', expr')\n"
+        ^"mov rax, sob_void;'Moshe was in: ScmBoxSet' (var', expr')\n"
       | ScmLambda' (params', Simple, body) ->
          let label_loop_env = make_lambda_simple_loop_env ()
          and label_loop_env_end = make_lambda_simple_loop_env_end ()

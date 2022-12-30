@@ -184,7 +184,7 @@ module Tag_Parser : TAG_PARSER = struct
 
   let rec macro_expand_cond_ribs ribs =
     match ribs with
-    | ScmNil -> raise (X_syntax "cond ribs can't be null")
+    | ScmNil -> ScmVoid
     | ScmPair (ScmPair (ScmSymbol "else", exprs), ribs) ->
       ScmPair (ScmSymbol "begin", exprs)
     | ScmPair (ScmPair (expr,
@@ -698,24 +698,14 @@ module Semantic_Analysis : SEMANTIC_ANALYSIS = struct
 
   let should_box_var name expr params = 
     let (reads, writes) = find_reads_and_writes name expr params in 
-    if List.length reads = 0 || List.length writes = 0
-      then false
-      else 
-        let reads_x_writes = cross_product reads writes in
-        match ormap (fun ((v1, env1) , (v2, env2)) -> 
-          let v1_name = match v1 with 
-            | Var' (name, _) -> name
-          in let v2_name = match v2 with 
-          | Var' (name, _) -> name
-          in let rib_of_v1 = List.find (fun rib -> (lookup_in_rib v1_name rib) != None) env1 in
-          let rib_of_v2 = List.find (fun rib -> (lookup_in_rib v2_name rib) != None) env2 in
-          if (rib_of_v1 != rib_of_v2)
-            then true
-            else false
-        ) reads_x_writes with
-        | false -> false
-        | _ -> true
-
+    let get_envs lst = List.map (fun (_, env) -> env) lst in
+    let reads_envs = get_envs reads in
+    let writes_envs = get_envs writes in
+    let get_last lst = List.nth lst ((List.length lst) - 1) in
+    List.exists (fun read_env -> 
+                    List.exists (fun write_env -> 
+                                (get_last read_env) != (get_last write_env)) writes_envs) reads_envs;;
+                                
   let box_sets_and_gets name body =
     let rec run expr =
       match expr with
