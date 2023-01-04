@@ -22,8 +22,7 @@ module type CODE_GENERATION =
   end;;
 
 module Code_Generation (*: CODE_GENERATION*)= struct
-  open Tag_Parser;;
-  open Semantic_Analysis;;
+
   (* areas that raise this exception are NOT for the
    * final project! please leave these unimplemented,
    * as this will require major additions to your
@@ -54,15 +53,13 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     in function
     | [] -> []
     | s -> run (s, n, (fun s -> s));;
-
-  let rec remove_dupes dupeless = function
-    | first :: rest -> remove_dupes (dupeless @ [first]) 
-            (List.filter (fun val_in_list -> first != val_in_list) rest)
-    | x -> dupeless @ x
     
-  let remove_duplicates = function 
-      | [] -> []
-      | lst -> remove_dupes [] lst;;
+  let remove_duplicates = 
+    (fun lst -> List.fold_left (fun lst const -> 
+      if (List.mem const lst) 
+            then lst 
+            else lst @ [const]) 
+    [] lst);;
   
   let collect_constants = 
     let rec collector = function
@@ -104,7 +101,7 @@ module Code_Generation (*: CODE_GENERATION*)= struct
 
   let search_constant_address = 
     let find_address const_to_find table = 
-      match List.find_opt(fun (sexpr, loc, repr) -> sexpr == const_to_find) table with
+      match List.find_opt(fun (sexpr, loc, repr) -> sexpr = const_to_find) table with
         | Some (_, loc, _) -> loc
         | _ -> raise (X_this_should_not_happen "NO GOD! NO GOD PLEASE NO! NO! NO! NOOOOOOOOOO!")
       in find_address
@@ -413,15 +410,15 @@ module Code_Generation (*: CODE_GENERATION*)= struct
     let free_vars = make_free_vars_table exprs' in
     let rec run params env = function
       | ScmConst' sexpr -> 
-         let label = search_constant_address sexpr consts in
+         let loc = search_constant_address sexpr consts in
          Printf.sprintf
-          "\tmov rax, %d ;'Moshe was in: ScmConst' sexpr\n"
-          label
+          "\tmov rax, qword L_constants + %d ;'Moshe was in: ScmConst' sexpr\n"
+          loc
       | ScmVarGet' (Var' (v, Free)) ->
-         let label = search_free_var_table v free_vars in
+         let loc = search_free_var_table v free_vars in
          Printf.sprintf
            "\tmov rax, qword [%s]\n"
-           label
+           loc
       | ScmVarGet' (Var' (v, Param minor)) ->
          Printf.sprintf 
           "\tmov rax, qword [rbp + 8 * (4 + %d)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))\n"
@@ -430,15 +427,17 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          "\tmov rax, qword [rbp + 8 * 2] ;'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n"
          ^(Printf.sprintf "\tmov rax, qword [rax + 8 * %d];'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n" major)
          ^(Printf.sprintf "\tmov rax, qword [rax + 8 * %d];'Moshe was in: ScmVarGet' (Var' (v, Bound (major, minor)))\n" minor)
-      | ScmIf' (test, dit, dif) -> (*???? maybe need to add index to labels*)
+      | ScmIf' (test, dit, dif) ->
+        let label_else = make_if_else () in
+        let label_end = make_if_end () in
         (run params env test) 
-        ^"cmp rax, sob_false;'Moshe was in: ScmIf' (test, dit, dif);\n"
-        ^"je Lelse;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^"\tcmp rax, sob_boolean_false;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^(Printf.sprintf "\tje %s;'Moshe was in: ScmIf' (test, dit, dif);\n" label_else)
         ^(run params env dit)
-        ^"jmp Lexit;'Moshe was in: ScmIf' (test, dit, dif);\n"
-        ^"Lelse:;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^(Printf.sprintf "\tjmp %s;'Moshe was in: ScmIf' (test, dit, dif);\n" label_end)
+        ^(Printf.sprintf "\t%s:;'Moshe was in: ScmIf' (test, dit, dif);\n" label_else)
         ^(run params env dif)
-        ^"Lexit:;'Moshe was in: ScmIf' (test, dit, dif);\n"
+        ^(Printf.sprintf "\t%s:;'Moshe was in: ScmIf' (test, dit, dif);\n" label_end)
       | ScmSeq' exprs' ->
          String.concat "\n"
            (List.map (run params env) exprs')
@@ -467,7 +466,7 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          let free_var_v = search_free_var_table v free_vars in
          (run params env expr') 
         ^(Printf.sprintf "\tmov qword [%s], rax;'Moshe was in: ScmVarSet' (Var' (v, Free), expr')\n" free_var_v)
-        ^"mov rax, sob_void;'Moshe was in: ScmVarSet' (Var' (v, Free), expr')\n"
+        ^"\tmov rax, sob_void;'Moshe was in: ScmVarSet' (Var' (v, Free), expr')\n"
       | ScmVarSet' (Var' (v, Param minor), expr') ->
          (run params env expr')
          ^(Printf.sprintf "\tmov qword [rbp + 8 * (4 + %d)], rax ;'Moshe was in: ScmVarSet' (Var' (v, Param minor), expr')\n" minor)
@@ -494,10 +493,10 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          ^ "\tmov rax, qword [rax]\n"
       | ScmBoxSet' (var', expr') -> 
         (run params env expr')
-        ^"push rax;'Moshe was in: ScmBoxSet' (var', expr')\n"
+        ^"\tpush rax;'Moshe was in: ScmBoxSet' (var', expr')\n"
         ^(run params env (ScmVarGet' var'))
-        ^"pop qword [rax];'Moshe was in: ScmBoxSet' (var', expr')\n"
-        ^"mov rax, sob_void;'Moshe was in: ScmBoxSet' (var', expr')\n"
+        ^"\tpop qword [rax];'Moshe was in: ScmBoxSet' (var', expr')\n"
+        ^"\tmov rax, sob_void;'Moshe was in: ScmBoxSet' (var', expr')\n"
       | ScmLambda' (params', Simple, body) ->
          let label_loop_env = make_lambda_simple_loop_env ()
          and label_loop_env_end = make_lambda_simple_loop_env_end ()
@@ -513,14 +512,14 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; new rib\n" params)
          ^ "\tcall malloc\n"
          ^ "\tpush rax\n"
-         ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; extended env\n" (env + 1))
+         ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; extended env\n" (env + 1)) (*delete + 1 here if there are issues*)
          ^ "\tcall malloc\n"
          ^ "\tmov rdi, ENV\n"
          ^ "\tmov rsi, 0\n"
          ^ "\tmov rdx, 1\n"
          ^ (Printf.sprintf "%s:\t; ext_env[i + 1] <-- env[i]\n"
               label_loop_env)
-         ^ (Printf.sprintf "\tcmp rsi, %d\n" (env + 1))
+         ^ (Printf.sprintf "\tcmp rsi, %d\n" (env))
          ^ (Printf.sprintf "\tje %s\n" label_loop_env_end)
          ^ "\tmov rcx, qword [rdi + 8 * rsi]\n"
          ^ "\tmov qword [rax + 8 * rdx], rcx\n"
@@ -559,7 +558,21 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          ^ (Printf.sprintf "\tret 8 * (2 + %d)\n" (List.length params'))
          ^ (Printf.sprintf "%s:\t; new closure is in rax\n" label_end)
       | ScmLambda' (params', Opt opt, body) -> raise (X_not_yet_implemented "code_gen scmlambda")
-      | ScmApplic' (proc, args, Non_Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic")
+      | ScmApplic' (proc, args, Non_Tail_Call) -> (*raise (X_not_yet_implemented "code_gen scmapplic")*)
+        let args_code = List.fold_right (fun arg code -> 
+          (run params env arg) 
+          ^(Printf.sprintf "\tpush rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n")
+          ^code) args  ""  in
+        let args_size = List.length args in
+        args_code
+        ^(Printf.sprintf "\tpush %d;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n" args_size)
+        ^(run params env proc)
+        ^"\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^"\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^"\tcall SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^"\tadd rsp, 8 * 1; pop env 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^"\tpop rbx;pop arg count 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^"\tlea rsp, [rsp + 8 * rbx];'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
       | ScmApplic' (proc, args, Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic2")
     and runs params env exprs' =
       List.map
@@ -587,7 +600,7 @@ module Code_Generation (*: CODE_GENERATION*)= struct
 
   let compile_scheme_string file_out user =
     let init = file_to_string "init.scm" in
-    let source_code = init ^ user in
+    let source_code = (*init ^*) user in
     let sexprs = (PC.star Reader.nt_sexpr source_code 0).found in
     let exprs = List.map Tag_Parser.tag_parse sexprs in
     let exprs' = List.map Semantic_Analysis.semantics exprs in
@@ -602,3 +615,27 @@ end;; (* end of Code_Generation struct *)
 
 (* end-of-input *)
 
+open Semantic_Analysis;;
+
+open Tag_Parser;;
+open PC;;
+open Reader;;
+open Code_Generation;;
+let show str= (Semantic_Analysis.semantics (Tag_Parser.tag_parse (nt_sexpr str 0).found));;
+let get_const_table str = make_constants_table [(show str)];;
+let get_var_table str = make_free_vars_table [(show str)];;
+let get_code str = code_gen ([show str]);;
+
+let maymay file_out user =
+  let source_code = user in
+  let sexprs = (PC.star Reader.nt_sexpr source_code 0).found in
+  let exprs = List.map Tag_Parser.tag_parse sexprs in
+  let exprs' = List.map Semantic_Analysis.semantics exprs in
+  let asm_code = code_gen exprs' in
+    (string_to_file file_out asm_code;
+     Printf.printf "!!! Compilation finished. Time to assemble!\n");;  
+
+(* end-of-input *)
+let x = "(if (= 3 4) #f #t)";;
+maymay "s.asm" x;;
+show x;;

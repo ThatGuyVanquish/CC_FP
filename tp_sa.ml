@@ -696,16 +696,20 @@ module Semantic_Analysis : SEMANTIC_ANALYSIS = struct
                      List.map (fun bj -> (ai, bj)) bs')
                    as');;
 
+  let get_last_in_list lst = List.nth lst ((List.length lst) - 1);;
+
   let should_box_var name expr params = 
-    let (reads, writes) = find_reads_and_writes name expr params in 
-    let get_envs lst = List.map (fun (_, env) -> env) lst in
-    let reads_envs = get_envs reads in
-    let writes_envs = get_envs writes in
-    let get_last lst = List.nth lst ((List.length lst) - 1) in
-    List.exists (fun read_env -> 
-                    List.exists (fun write_env -> 
-                                (get_last read_env) != (get_last write_env)) writes_envs) reads_envs;;
-                                
+    let (reads, writes) = find_reads_and_writes name expr params in
+    let reads = List.map (fun (v, env) -> env) reads in
+    let writes = List.map (fun (v, env) -> env) writes in
+    List.exists (fun read -> 
+                  List.exists (fun write -> 
+                  if (read = [] || write = []) 
+                      then write != read
+                      else (get_last_in_list read) != (get_last_in_list write)
+                              ) writes
+                ) reads;;
+    
   let box_sets_and_gets name body =
     let rec run expr =
       match expr with
