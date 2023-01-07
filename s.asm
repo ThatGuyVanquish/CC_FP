@@ -80,10 +80,16 @@ L_constants:
 	db T_boolean_false
 	db T_boolean_true
 	db T_char, 0x00	; #\x0
+	db T_rational	; 5
+	dq 5, 1
 	db T_rational	; 4
 	dq 4, 1
 	db T_rational	; 3
 	dq 3, 1
+	db T_rational	; 2
+	dq 2, 1
+	db T_rational	; 1
+	dq 1, 1
 
 section .bss
 free_var_0:	; location of null?
@@ -197,8 +203,6 @@ free_var_53:	; location of numerator
 free_var_54:	; location of denominator
 	resq 1
 free_var_55:	; location of eq?
-	resq 1
-free_var_56:	; location of =
 	resq 1
 
 extern printf, fprintf, stdout, stderr, fwrite, exit, putchar
@@ -487,25 +491,123 @@ main:
 	mov rsi, L_code_ptr_eq
 	call bind_primitive
 
-	mov rax, qword L_constants + 23 ;'Moshe was in: ScmConst' sexpr
-	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	mov rax, qword L_constants + 6 ;'Moshe was in: ScmConst' sexpr
 	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	push 2;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	mov rax, qword [free_var_56]
+	mov rax, qword L_constants + 23 ;'Moshe was in: ScmConst' sexpr
+	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	mov rax, qword L_constants + 40 ;'Moshe was in: ScmConst' sexpr
+	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	mov rax, qword L_constants + 57 ;'Moshe was in: ScmConst' sexpr
+	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	mov rax, qword L_constants + 74 ;'Moshe was in: ScmConst' sexpr
+	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	push 5;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	mov rdi, (1 + 8 + 8)	; sob closure
+	call malloc
+	push rax
+	mov rdi, 8 * (2 + 1)	; new rib
+	call malloc
+	push rax
+	mov rdi, 8 * 1	; extended env
+	call malloc
+	mov rdi, ENV
+	mov rsi, 0
+	mov rdx, 1
+.L_lambda_opt_env_loop_0001:	; ext_env[i + 1] <-- env[i]
+	cmp rsi, 1
+	je .L_lambda_opt_env_end_0001
+	mov rcx, qword [rdi + 8 * rsi]
+	mov qword [rax + 8 * rdx], rcx
+	inc rsi
+	inc rdx
+	jmp .L_lambda_opt_env_loop_0001
+.L_lambda_opt_env_end_0001:
+	pop rbx
+	mov rsi, 0
+.L_lambda_opt_params_loop_0001:	; copy params
+	cmp rsi, 2	; check if already prepared stack for all non optional members
+	je .L_lambda_opt_params_end_0001
+	mov rdx, qword [rbp + 8 * 4 + 8 * rsi]
+	mov qword [rbx + 8 * rsi], rdx
+	inc rsi
+	jmp .L_lambda_opt_params_loop_0001
+.L_lambda_opt_params_end_0001:
+	push rax	; push address of extended environment
+	; calling malloc to build list of opt variable
+	mov rdi, (1 + 8 + 8) * 3	; opt list
+	cmp rdi, 0	; rdi == 0 meaning opt should be ScmNil
+	jne .L_lambda_opt_optional_params_loop_start_0001
+	mov rdi, 1
+	call malloc	; opt is Nil so we need to allocate 1 byte
+	mov byte [rax], T_nil
+	jmp .L_lambda_opt_optional_params_end_0001
+.L_lambda_opt_optional_params_loop_start_0001:
+	call malloc	; list held by optional var
+	mov rdi, 0
+.L_lambda_opt_optional_params_loop_0001:
+	cmp rsi, 5
+	je .L_lambda_opt_optional_params_end_0001
+	mov byte [rax + rdi], T_pair
+	mov rdx, qword [rbp + 8 * 4 + 8 * rsi]
+	mov SOB_PAIR_CAR(rax + rdi), rdx
+	cmp rsi, 4	; if rsi = params - 1, we need to add ScmNil as cdr
+	jne .L_Lambda_opt_optional_params_loop_continue_0001
+	mov SOB_PAIR_CDR(rax + rdi), T_nil
+	jmp .L_lambda_opt_optional_params_end_0001
+.L_Lambda_opt_optional_params_loop_continue_0001:
+	mov rdx, [rax + rdi + 1 + 8 + 8]
+	mov SOB_PAIR_CDR(rax + rdi), rdx	; set cdr to the address of the next pair
+	inc rsi
+	add rdi, 1 + 8 + 8
+	jmp .L_lambda_opt_optional_params_loop_0001
+.L_lambda_opt_optional_params_end_0001:
+	mov qword [rbx + 8 * 2], rax
+	mov r8, rax	; store the address of the opt list in r8
+	pop rax	; address of extended env back in rax, proceed as in lambda simple
+	mov qword [rax], rbx	; ext_env[0] <-- new_rib 
+	mov rbx, rax
+	pop rax	; rax now holds address of sob_closure
+	mov byte [rax], T_closure
+	mov SOB_CLOSURE_ENV(rax), rbx
+	mov SOB_CLOSURE_CODE(rax), .L_lambda_opt_code_0001
+	jmp .L_lambda_opt_end_0001
+.L_lambda_opt_code_0001:; lambda-opt body
+	cmp qword [rsp + 8 * 2], 2;'Moshe was in ScmLambda' opt
+	je .L_lambda_opt_arity_check_exact_0001
+	jg .L_lambda_opt_arity_check_more_0001
+	push qword [rsp + 8 * 2]
+	push 2
+	jmp L_error_incorrect_arity_opt
+.L_lambda_opt_arity_check_exact_0001:
+	sub rsp, 8	; moving rsp down 8 bits to save a spot for the address of the list in memory
+	mov rsi, 0
+.L_lambda_opt_stack_setup_loop_0001:
+	cmp rsi, 4 + 2
+	; 4 is for old rbp, ret, env and argc
+	je .L_lambda_opt_stack_setup_loop_end_0001
+	mov rdx, qword [rsp + 8 + 8 * rsi]	; move the data from the old rsp in the stack to rdx
+	mov qword [rsp + 8 * rsi], rdx	; so we can move it to the new rsp
+	jmp .L_lambda_opt_stack_setup_loop_0001
+.L_lambda_opt_stack_setup_loop_end_0001:
+	sub rbp, 8
+	mov qword [rbp + 8 * 4 + 8 * 2], r8	; move the new list to argv[params'.size()]
+	mov qword [rbp + 8 * 3], 3	; set argc = params'.size() + 1
+	enter 0, 0
+	mov rax, qword [rbp + 8 * (4 + 2)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))
+	leave
+	ret 8 * 3
+	jmp .L_lambda_opt_end_0001
+.L_lambda_opt_arity_check_more_0001:
+	mov qword [rbp + 8 * 4 + 8 * 2], r8	; move the new list to argv[params'.size()]
+	mov qword [rbp + 8 * 3], 3	; set argc = params'.size() + 1
+	enter 0, 0
+	mov rax, qword [rbp + 8 * (4 + 2)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))
+	leave
+	ret 8 * 5
+.L_lambda_opt_end_0001:	; new closure is in rax
 	assert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	push SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	call SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	add rsp, 8 * 1; pop env 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	pop rbx;pop arg count 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	lea rsp, [rsp + 8 * rbx];'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	cmp rax, sob_boolean_false;'Moshe was in: ScmIf' (test, dit, dif);
-	je .L_if_else_0001;'Moshe was in: ScmIf' (test, dit, dif);
-	mov rax, qword L_constants + 2 ;'Moshe was in: ScmConst' sexpr
-	jmp .L_if_end_0001;'Moshe was in: ScmIf' (test, dit, dif);
-	.L_if_else_0001:;'Moshe was in: ScmIf' (test, dit, dif);
-	mov rax, qword L_constants + 3 ;'Moshe was in: ScmConst' sexpr
-	.L_if_end_0001:;'Moshe was in: ScmIf' (test, dit, dif);
 
 	mov rdi, rax
 	call print_sexpr_if_not_void
@@ -514,7 +616,9 @@ main:
         mov rsi, qword [top_of_memory]
         sub rsi, memory
         mov rax, 0
+	ENTER
         call printf
+	LEAVE
 	leave
 	ret
 
@@ -522,7 +626,9 @@ L_error_non_closure:
         mov rdi, qword [stderr]
         mov rsi, fmt_non_closure
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -2
         call exit
 
@@ -530,7 +636,9 @@ L_error_improper_list:
 	mov rdi, qword [stderr]
 	mov rsi, fmt_error_improper_list
 	mov rax, 0
+	ENTER
 	call fprintf
+	LEAVE
 	mov rax, -7
 	call exit
 
@@ -545,7 +653,9 @@ L_error_incorrect_arity_common:
         pop rdx
         pop rcx
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -6
         call exit
 
@@ -831,19 +941,25 @@ print_sexpr:
 	push rdi
 	mov rdi, fmt_dotted_pair
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	pop rdi
 	call print_sexpr
 	mov rdi, fmt_rparen
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	LEAVE
 	ret
 
 .Lcdr_nil:
 	mov rdi, fmt_rparen
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	LEAVE
 	ret
 
@@ -851,7 +967,9 @@ print_sexpr:
 	push rdi
 	mov rdi, fmt_space
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	mov rdi, qword [rsp]
 	mov rdi, SOB_PAIR_CAR(rdi)
 	call print_sexpr
@@ -866,7 +984,9 @@ print_sexpr:
 	push rdi
 	mov rdi, fmt_vector
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	mov rdi, qword [rsp]
 	push qword [rdi + 1]
 	push 1
@@ -881,7 +1001,9 @@ print_sexpr:
 	je .Lvector_end
 	mov rdi, fmt_space
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	mov rax, qword [rsp]
 	mov rbx, qword [rsp + 8*2]
 	mov rdi, qword [rbx + 1 + 8 + 8 * rax] ; v[i]
@@ -1028,13 +1150,17 @@ print_sexpr:
 	mov rcx, rdi
 	mov rdi, qword [stderr]
 	mov rax, 0
+	ENTER
 	call fprintf
+	LEAVE
 	mov rax, -1
 	call exit
 
 .Lemit:
 	mov rax, 0
+	ENTER
 	call printf
+	LEAVE
 	jmp .Lend
 
 .Lend:
@@ -1292,7 +1418,9 @@ L_code_ptr_write_char:
         mov rdi, fmt_char
         mov rsi, rax
         mov rax, 0
+	ENTER
         call printf
+	LEAVE
         mov rax, sob_void
         LEAVE
         ret AND_KILL_FRAME(1)
@@ -1693,12 +1821,16 @@ L_code_ptr_error:
         assert_string(rsi)
         mov rdi, fmt_scheme_error_part_1
         mov rax, 0
+	ENTER
         call printf
+	LEAVE
         mov rdi, PARAM(0)
         call print_sexpr
         mov rdi, fmt_scheme_error_part_2
         mov rax, 0
+	ENTER
         call printf
+	LEAVE
         mov rax, PARAM(1)       ; sob_string
         mov rsi, 1              ; size = 1 byte
         mov rdx, qword [rax + 1] ; length
@@ -1707,7 +1839,9 @@ L_code_ptr_error:
         call fwrite
         mov rdi, fmt_scheme_error_part_3
         mov rax, 0
+	ENTER
         call printf
+	LEAVE
         mov rax, -9
         call exit
 
@@ -1743,7 +1877,7 @@ L_code_ptr_raw_less_than_qq:
         cqo
         imul qword [rdi + 1 + 8] ; den2
         mov rcx, rax
-        mov rax, qword [rdi + 1 + 8] ; den1
+        mov rax, qword [rsi + 1 + 8] ; den1
         cqo
         imul qword [rdi + 1]          ; num2
         sub rcx, rax
@@ -1755,6 +1889,7 @@ L_code_ptr_raw_less_than_qq:
 .L_exit:
         LEAVE
         ret AND_KILL_FRAME(2)
+
 
 L_code_ptr_raw_equal_rr:
         ENTER
@@ -2093,7 +2228,9 @@ L_error_integer_range:
         mov rdi, qword [stderr]
         mov rsi, fmt_integer_range
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -5
         call exit
 
@@ -2102,7 +2239,9 @@ L_error_arg_count_0:
         mov rsi, fmt_arg_count_0
         mov rdx, COUNT
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -3
         call exit
 
@@ -2111,7 +2250,9 @@ L_error_arg_count_1:
         mov rsi, fmt_arg_count_1
         mov rdx, COUNT
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -3
         call exit
 
@@ -2120,7 +2261,9 @@ L_error_arg_count_2:
         mov rsi, fmt_arg_count_2
         mov rdx, COUNT
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -3
         call exit
 
@@ -2129,7 +2272,9 @@ L_error_arg_count_12:
         mov rsi, fmt_arg_count_12
         mov rdx, COUNT
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -3
         call exit
 
@@ -2138,7 +2283,9 @@ L_error_arg_count_3:
         mov rsi, fmt_arg_count_3
         mov rdx, COUNT
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -3
         call exit
         
@@ -2146,7 +2293,9 @@ L_error_incorrect_type:
         mov rdi, qword [stderr]
         mov rsi, fmt_type
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -4
         call exit
 
@@ -2154,7 +2303,9 @@ L_error_division_by_zero:
         mov rdi, qword [stderr]
         mov rsi, fmt_division_by_zero
         mov rax, 0
+	ENTER
         call fprintf
+	LEAVE
         mov rax, -8
         call exit
 
