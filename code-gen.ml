@@ -486,8 +486,23 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          raise X_not_yet_supported
       | ScmVarDef' (Var' (v, Bound (major, minor)), expr') ->
          raise X_not_yet_supported
-      | ScmBox' (Var' (v, Param minor)) -> raise (X_not_yet_implemented "code_gen scmbox")
-      | ScmBox' _ -> raise (X_not_yet_implemented "code_gen scmbox2")
+      | ScmBox' (Var' (v, Param minor)) -> 
+        (* we want to get the result from getting back var' v,
+           then allocate memory using malloc to box v in
+        *)
+        (run params env (ScmVarGet' (Var' (v, Param minor))))
+        ^ "\tmov rbx, rax\n"
+        ^ "\tmov rdi, 1\t; we don't know the exact size of the value kept with alias v so can't allocate exact number\n"
+        ^ "\tcall malloc\n"
+        ^ "\tmov [rax], rbx\n"
+        (*^ "\tmov rax, sob_void; don't completely understand if we need to return the address in 
+           rax or sob_void\n"*)
+
+
+
+
+
+      | ScmBox' _ -> raise (X_this_should_not_happen "'Moshe is taking over the planet using empty boxes")
       | ScmBoxGet' var' ->
          (run params env (ScmVarGet' var'))
          ^ "\tmov rax, qword [rax]\n"
@@ -512,14 +527,14 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; new rib\n" params)
          ^ "\tcall malloc\n"
          ^ "\tpush rax\n"
-         ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; extended env\n" (env + 1)) (*delete + 1 here if there are issues*)
+         ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; extended env\n" (env + 1))
          ^ "\tcall malloc\n"
          ^ "\tmov rdi, ENV\n"
          ^ "\tmov rsi, 0\n"
          ^ "\tmov rdx, 1\n"
          ^ (Printf.sprintf "%s:\t; ext_env[i + 1] <-- env[i]\n"
               label_loop_env)
-         ^ (Printf.sprintf "\tcmp rsi, %d\n" (env))
+         ^ (Printf.sprintf "\tcmp rsi, %d\n" (env + 1))
          ^ (Printf.sprintf "\tje %s\n" label_loop_env_end)
          ^ "\tmov rcx, qword [rdi + 8 * rsi]\n"
          ^ "\tmov qword [rax + 8 * rdx], rcx\n"
@@ -557,23 +572,179 @@ module Code_Generation (*: CODE_GENERATION*)= struct
          ^ "\tleave\n"
          ^ (Printf.sprintf "\tret 8 * (2 + %d)\n" (List.length params'))
          ^ (Printf.sprintf "%s:\t; new closure is in rax\n" label_end)
-      | ScmLambda' (params', Opt opt, body) -> raise (X_not_yet_implemented "code_gen scmlambda")
-      | ScmApplic' (proc, args, Non_Tail_Call) -> (*raise (X_not_yet_implemented "code_gen scmapplic")*)
+      | ScmLambda' (params', Opt opt, body) ->
+        let label_loop_env = make_lambda_opt_loop_env ()
+        and label_loop_env_end = make_lambda_opt_loop_env_end ()
+        and label_loop_params = make_lambda_opt_loop_params ()
+        and label_loop_params_end = make_lambda_opt_loop_params_end ()
+        and label_code = make_lambda_opt_code ()
+        and label_arity_ok = make_make_label ".L_lambda_opt_arity_check_ok" ()
+        and label_arity_more = make_lambda_opt_arity_more ()
+        and label_stack_setup_loop = make_make_label ".L_lambda_opt_stack_setup_loop" ()
+        and label_stack_setup_end = make_make_label ".L_lambda_opt_stack_setup_end" ()
+        and label_opt_list_loop = make_make_label ".L_lambda_opt_optional_list_loop" ()
+        and label_opt_list_loop_end = make_make_label ".L_lambda_opt_optional_list_end" ()
+        and label_wrap_things_up = make_make_label ".L_lambda_opt_wrap_things_up" ()
+        and label_end = make_lambda_opt_end ()
+        in let params_tag_size = (List.length params')
+        in
+        "\tmov rdi, (1 + 8 + 8)\t; sob closure\n"
+        ^ "\tcall malloc\n"
+        ^ "\tpush rax\n"
+        ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; new rib\n" params)
+        ^ "\tcall malloc\n"
+        ^ "\tpush rax\n"
+        ^ (Printf.sprintf "\tmov rdi, 8 * %d\t; extended env\n" (env + 1))
+        ^ "\tcall malloc\n"
+        ^ "\tmov rdi, ENV\n"
+        ^ "\tmov rsi, 0\n"
+        ^ "\tmov rdx, 1\n"
+        ^ (Printf.sprintf "%s:\t; ext_env[i + 1] <-- env[i]\n"
+            label_loop_env)
+        ^ (Printf.sprintf "\tcmp rsi, %d\n" (env + 1))
+        ^ (Printf.sprintf "\tje %s\n" label_loop_env_end)
+        ^ "\tmov rcx, qword [rdi + 8 * rsi]\n"
+        ^ "\tmov qword [rax + 8 * rdx], rcx\n"
+        ^ "\tinc rsi\n"
+        ^ "\tinc rdx\n"
+        ^ (Printf.sprintf "\tjmp %s\n" label_loop_env)
+        ^ (Printf.sprintf "%s:\n" label_loop_env_end)
+        ^ "\tpop rbx\n"
+        ^ "\tmov rsi, 0\n"
+        ^ (Printf.sprintf "%s:\t; copy params\n" label_loop_params)
+        ^ (Printf.sprintf "\tcmp rsi, %d\n" params)
+        ^ (Printf.sprintf "\tje %s\n" label_loop_params_end)
+        ^ "\tmov rdx, qword [rbp + 8 * rsi + 8 * 4]\n"
+        ^ "\tmov qword [rbx + 8 * rsi], rdx\n"
+        ^ "\tinc rsi\n"
+        ^ (Printf.sprintf "\tjmp %s\n" label_loop_params)
+        ^ (Printf.sprintf "%s:\n" label_loop_params_end)
+        ^ "\tmov qword [rax], rbx\t; ext_env[0] <-- new_rib \n"
+        ^ "\tmov rbx, rax\n"
+        ^ "\tpop rax\n"
+        ^ "\tmov byte [rax], T_closure\n"
+        ^ "\tmov SOB_CLOSURE_ENV(rax), rbx\n"
+        ^ (Printf.sprintf "\tmov SOB_CLOSURE_CODE(rax), %s\n" label_code)
+        ^ (Printf.sprintf "\tjmp %s\n" label_end)
+        ^ (Printf.sprintf "%s:\t; lambda-opt body\n" label_code)
+        ^ (Printf.sprintf "\tcmp qword [rsp + 8 * 2], %d\n"
+            params_tag_size)
+        ^ (Printf.sprintf "\tjge %s\n" label_arity_ok)
+        ^ "\tpush qword [rsp + 8 * 2]\n"
+        ^ (Printf.sprintf "\tpush %d\n" params_tag_size)
+        ^ "\tjmp L_error_incorrect_arity_opt\n"
+        ^ (Printf.sprintf "%s:\n" label_arity_ok)
+        ^ "\tenter 0, 0\n"
+        (*
+          Create the list which is held by opt if necessary
+          otherwise store nil there
+          We'll create the list in reverse, so that
+          at the end of each iteration RDX
+          will hold the list consisting of 
+          argv[rsi] -> argv[argc - 1]
+        *)
+        ^ "\tmov rsi, COUNT\t; rsi holds the index of current parameter\n"
+        ^ "\tdec rsi\n"
+        ^ "\tmov r8, COUNT\t; r8 holds the amount of parameters left to put in the list\n"
+        ^ (Printf.sprintf "\tsub r8, %d\n" params_tag_size)
+        ^ "\tmov rdx, sob_nil\n"
+        ^ (Printf.sprintf "%s:\n" label_opt_list_loop)
+        ^ "\tcmp r8, 0\n"
+        ^ (Printf.sprintf "\tje %s\n" label_opt_list_loop_end)
+        ^ "\tmov r9, PARAM(rsi)\n"
+        ^ "\tmov rdi, 1 + 8 + 8; store enough memory for a pair struct in rdi to call malloc\n"
+        ^ "\tcall malloc\n"
+        ^ "\tmov byte [rax], T_pair\n"
+        ^ "\tmov SOB_PAIR_CAR(rax), r9\n"
+        ^ "\tmov SOB_PAIR_CDR(rax), rdx\n"
+        ^ "\tmov rdx, rax\n"
+        ^ "\tdec rsi\n"
+        ^ "\tdec r8\n"
+        ^ (Printf.sprintf "\tjmp %s\n" label_opt_list_loop)
+        ^ (Printf.sprintf "%s:\n" label_opt_list_loop_end)
+        (* place the list as the last necessary parameter *)
+        ^ (Printf.sprintf "\tmov PARAM(%d), rdx\n" params_tag_size)
+        (*
+          if params == List.length params' or params == List.length params' + magic,
+          then we don't need to adjust the stack upwards, therefore jump to
+          label_arity_exact
+        *)
+        ^ (Printf.sprintf "\tcmp COUNT, %d\n" (params_tag_size + 1))
+        ^ (Printf.sprintf "\tjle %s\n" label_wrap_things_up)
+        ^ (Printf.sprintf "%s:\n" label_arity_more)
+        ^ "\t\t\t; r8 will hold the amount of values left to push up\n"
+        ^ "\t\t\t; initial value is List.length params' + previously stored values + magic\n"
+        ^ (Printf.sprintf "\tmov r8, %d + 4 + 1\n" params_tag_size)
+        ^ "\t\t\t; r9 will hold a constant offset to store the current value at\n"
+        ^ "\t\t\t; I.E. we'll store [rbp + 8 * r8] at [rbp + 8 * (r8 + r9)]\n"
+        ^ "\tmov r9, COUNT\n"
+        ^ (Printf.sprintf "\tsub r9, %d\n" (params_tag_size + 1))
+        ^ "\t\t\t; calculate initial offset = rbp + 8 * (index - 1) and store at rsi\n"
+        ^ "\tmov rsi, r8\n"
+        ^ "\tdec rsi\n"
+        ^ "\tshl rsi, 3\t; 3 left shifts cause (((* 2)* 2)* 2)\n"
+        ^ "\tadd rsi, rbp\n"
+        ^ (Printf.sprintf "%s:\n" label_stack_setup_loop)
+        ^ "\tcmp r8, 0\n"
+        ^ (Printf.sprintf "\tje %s\n" label_stack_setup_end)
+        ^ "\tmov rdi, [rsi]\t; rdi holds the current value to be moved\n"
+        ^ "\tmov [rsi + 8 * r9], rdi\n"
+        ^ "\tdec r8\n"
+        ^ "\tsub rsi, 8\n"
+        ^ (Printf.sprintf "\tjmp %s\n" label_stack_setup_loop)
+        ^ (Printf.sprintf "%s:\n" label_stack_setup_end)
+        (* move the base pointer upwards with the stack *)
+        ^ "\tshl r9, 3\t; multiply offset by 8 to get the number of bytes to add to rbp\n"
+        ^ "\tadd rbp, r9\n"
+        (* set the number of parameters to the correct number *)
+        ^ (Printf.sprintf "\tmov COUNT, %d\n" (params_tag_size + 1))
+
+        ^ (Printf.sprintf "%s:\n" label_wrap_things_up)
+        ^ (run (List.length params') (env + 1) body)
+        ^ "\tleave\n"
+        ^ (Printf.sprintf "\tret 8 * (2 + %d)\n" (params_tag_size + 1))
+        ^ (Printf.sprintf "%s:\t; new closure is in rax\n" label_end)
+      | ScmApplic' (proc, args, Non_Tail_Call) ->
         let args_code = List.fold_right (fun arg code -> 
-          (run params env arg) 
+          code
+          ^(run params env arg)
           ^(Printf.sprintf "\tpush rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n")
-          ^code) args  ""  in
+          ) args  ""  in
         let args_size = List.length args in
-        args_code
-        ^(Printf.sprintf "\tpush %d;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n" args_size)
-        ^(run params env proc)
-        ^"\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-        ^"\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-        ^"\tcall SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-        ^"\tadd rsp, 8 * 1; pop env 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-        ^"\tpop rbx;pop arg count 'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-        ^"\tlea rsp, [rsp + 8 * rbx];'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        "\tpush sob_nil\t; hold 8 bytes for magic\n"
+        ^ args_code
+        ^ (Printf.sprintf "\tpush %d;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n" args_size)
+        ^ (run params env proc)
+        ^ "\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^ "\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^ "\tcall SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
       | ScmApplic' (proc, args, Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic2")
+        (* let args_code = List.fold_right (fun arg code -> 
+          code
+          ^(run params env arg)
+          ^(Printf.sprintf "\tpush rax;'Moshe was in: ScmApplic' (proc, args, Tail_call)\n")
+          ) args  ""  in
+        let args_size = List.length args in
+        (* "\tmov rsp, rbp\n"*)
+        (*^*)args_code
+        ^ (Printf.sprintf "\tpush %d;'Moshe was in: ScmApplic' (proc, args, Tail_call)\n" args_size)
+        ^ (run params env proc)
+        ^ "\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n"
+        ^ "\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^ "\tpush qword [rbp + 8 * 1] ; old ret addr\n"
+        ^ "\tpush qword[rbp] ; the old rbp\n"
+        (* fix the stack *)
+        ^ "\tmov r8, COUNT\t; r8 holds how many addresses in the stack we need to overwrite\n"
+        ^ "\tadd r8, 4\t; old rbp + ret address + env + params\n"
+        ^ "\tmov r9, r8\n"
+        ^ "\t" *)
+(* 
+
+
+        ^ "\tpop rbp; restore the old rbp\n"
+        ^ "\tjmp SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n" *)
+
+
     and runs params env exprs' =
       List.map
         (fun expr' ->
@@ -636,6 +807,6 @@ let maymay file_out user =
      Printf.printf "!!! Compilation finished. Time to assemble!\n");;  
 
 (* end-of-input *)
-let x = "(if (= 3 4) #f #t)";;
+let x = "((lambda (x y . z) z)1 2)";;
 maymay "s.asm" x;;
 show x;;
