@@ -80,12 +80,6 @@ L_constants:
 	db T_boolean_false
 	db T_boolean_true
 	db T_char, 0x00	; #\x0
-	db T_rational	; 5
-	dq 5, 1
-	db T_rational	; 4
-	dq 4, 1
-	db T_rational	; 3
-	dq 3, 1
 	db T_rational	; 2
 	dq 2, 1
 	db T_rational	; 1
@@ -491,21 +485,16 @@ main:
 	mov rsi, L_code_ptr_eq
 	call bind_primitive
 
+	push sob_nil	; hold 8 bytes for magic
 	mov rax, qword L_constants + 6 ;'Moshe was in: ScmConst' sexpr
 	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	mov rax, qword L_constants + 23 ;'Moshe was in: ScmConst' sexpr
 	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	mov rax, qword L_constants + 40 ;'Moshe was in: ScmConst' sexpr
-	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	mov rax, qword L_constants + 57 ;'Moshe was in: ScmConst' sexpr
-	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	mov rax, qword L_constants + 74 ;'Moshe was in: ScmConst' sexpr
-	push rax;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
-	push 5;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
+	push 2;'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	mov rdi, (1 + 8 + 8)	; sob closure
 	call malloc
 	push rax
-	mov rdi, 8 * (2 + 1)	; new rib
+	mov rdi, 8 * 0	; new rib
 	call malloc
 	push rax
 	mov rdi, 8 * 1	; extended env
@@ -525,85 +514,79 @@ main:
 	pop rbx
 	mov rsi, 0
 .L_lambda_opt_params_loop_0001:	; copy params
-	cmp rsi, 2	; check if already prepared stack for all non optional members
+	cmp rsi, 0
 	je .L_lambda_opt_params_end_0001
-	mov rdx, qword [rbp + 8 * 4 + 8 * rsi]
+	mov rdx, qword [rbp + 8 * rsi + 8 * 4]
 	mov qword [rbx + 8 * rsi], rdx
 	inc rsi
 	jmp .L_lambda_opt_params_loop_0001
 .L_lambda_opt_params_end_0001:
-	push rax	; push address of extended environment
-	; calling malloc to build list of opt variable
-	mov rdi, (1 + 8 + 8) * 3	; opt list
-	cmp rdi, 0	; rdi == 0 meaning opt should be ScmNil
-	jne .L_lambda_opt_optional_params_loop_start_0001
-	mov rdi, 1
-	call malloc	; opt is Nil so we need to allocate 1 byte
-	mov byte [rax], T_nil
-	jmp .L_lambda_opt_optional_params_end_0001
-.L_lambda_opt_optional_params_loop_start_0001:
-	call malloc	; list held by optional var
-	mov rdi, 0
-.L_lambda_opt_optional_params_loop_0001:
-	cmp rsi, 5
-	je .L_lambda_opt_optional_params_end_0001
-	mov byte [rax + rdi], T_pair
-	mov rdx, qword [rbp + 8 * 4 + 8 * rsi]
-	mov SOB_PAIR_CAR(rax + rdi), rdx
-	cmp rsi, 4	; if rsi = params - 1, we need to add ScmNil as cdr
-	jne .L_Lambda_opt_optional_params_loop_continue_0001
-	mov SOB_PAIR_CDR(rax + rdi), T_nil
-	jmp .L_lambda_opt_optional_params_end_0001
-.L_Lambda_opt_optional_params_loop_continue_0001:
-	mov rdx, [rax + rdi + 1 + 8 + 8]
-	mov SOB_PAIR_CDR(rax + rdi), rdx	; set cdr to the address of the next pair
-	inc rsi
-	add rdi, 1 + 8 + 8
-	jmp .L_lambda_opt_optional_params_loop_0001
-.L_lambda_opt_optional_params_end_0001:
-	mov qword [rbx + 8 * 2], rax
-	mov r8, rax	; store the address of the opt list in r8
-	pop rax	; address of extended env back in rax, proceed as in lambda simple
 	mov qword [rax], rbx	; ext_env[0] <-- new_rib 
 	mov rbx, rax
-	pop rax	; rax now holds address of sob_closure
+	pop rax
 	mov byte [rax], T_closure
 	mov SOB_CLOSURE_ENV(rax), rbx
 	mov SOB_CLOSURE_CODE(rax), .L_lambda_opt_code_0001
 	jmp .L_lambda_opt_end_0001
-.L_lambda_opt_code_0001:; lambda-opt body
-	cmp qword [rsp + 8 * 2], 2;'Moshe was in ScmLambda' opt
-	je .L_lambda_opt_arity_check_exact_0001
-	jg .L_lambda_opt_arity_check_more_0001
+.L_lambda_opt_code_0001:	; lambda-opt body
+	cmp qword [rsp + 8 * 2], 2
+	jge .L_lambda_opt_arity_check_ok_0001
 	push qword [rsp + 8 * 2]
 	push 2
 	jmp L_error_incorrect_arity_opt
-.L_lambda_opt_arity_check_exact_0001:
-	sub rsp, 8	; moving rsp down 8 bits to save a spot for the address of the list in memory
-	mov rsi, 0
-.L_lambda_opt_stack_setup_loop_0001:
-	cmp rsi, 4 + 2
-	; 4 is for old rbp, ret, env and argc
-	je .L_lambda_opt_stack_setup_loop_end_0001
-	mov rdx, qword [rsp + 8 + 8 * rsi]	; move the data from the old rsp in the stack to rdx
-	mov qword [rsp + 8 * rsi], rdx	; so we can move it to the new rsp
-	jmp .L_lambda_opt_stack_setup_loop_0001
-.L_lambda_opt_stack_setup_loop_end_0001:
-	sub rbp, 8
-	mov qword [rbp + 8 * 4 + 8 * 2], r8	; move the new list to argv[params'.size()]
-	mov qword [rbp + 8 * 3], 3	; set argc = params'.size() + 1
+.L_lambda_opt_arity_check_ok_0001:
 	enter 0, 0
-	mov rax, qword [rbp + 8 * (4 + 2)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))
-	leave
-	ret 8 * 3
-	jmp .L_lambda_opt_end_0001
+	mov rsi, COUNT	; rsi holds the index of current parameter
+	dec rsi
+	mov r8, COUNT	; r8 holds the amount of parameters left to put in the list
+	sub r8, 2
+	mov rdx, sob_nil
+.L_lambda_opt_optional_list_loop_0001:
+	cmp r8, 0
+	je .L_lambda_opt_optional_list_end_0001
+	mov r9, PARAM(rsi)
+	mov rdi, 1 + 8 + 8; store enough memory for a pair struct in rdi to call malloc
+	call malloc
+	mov byte [rax], T_pair
+	mov SOB_PAIR_CAR(rax), r9
+	mov SOB_PAIR_CDR(rax), rdx
+	mov rdx, rax
+	dec rsi
+	dec r8
+	jmp .L_lambda_opt_optional_list_loop_0001
+.L_lambda_opt_optional_list_end_0001:
+	mov PARAM(2), rdx
+	cmp COUNT, 3
+	jle .L_lambda_opt_wrap_things_up_0001
 .L_lambda_opt_arity_check_more_0001:
-	mov qword [rbp + 8 * 4 + 8 * 2], r8	; move the new list to argv[params'.size()]
-	mov qword [rbp + 8 * 3], 3	; set argc = params'.size() + 1
-	enter 0, 0
+			; r8 will hold the amount of values left to push up
+			; initial value is List.length params' + previously stored values + magic
+	mov r8, 2 + 4 + 1
+			; r9 will hold a constant offset to store the current value at
+			; I.E. we'll store [rbp + 8 * r8] at [rbp + 8 * (r8 + r9)]
+	mov r9, COUNT
+	sub r9, 3
+			; calculate initial offset = rbp + 8 * (index - 1) and store at rsi
+	mov rsi, r8
+	dec rsi
+	shl rsi, 3	; 3 left shifts cause (((* 2)* 2)* 2)
+	add rsi, rbp
+.L_lambda_opt_stack_setup_loop_0001:
+	cmp r8, 0
+	je .L_lambda_opt_stack_setup_end_0001
+	mov rdi, [rsi]	; rdi holds the current value to be moved
+	mov [rsi + 8 * r9], rdi
+	dec r8
+	sub rsi, 8
+	jmp .L_lambda_opt_stack_setup_loop_0001
+.L_lambda_opt_stack_setup_end_0001:
+	shl r9, 3	; multiply offset by 8 to get the number of bytes to add to rbp
+	add rbp, r9
+	mov COUNT, 3
+.L_lambda_opt_wrap_things_up_0001:
 	mov rax, qword [rbp + 8 * (4 + 2)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))
 	leave
-	ret 8 * 5
+	ret 8 * (2 + 3)
 .L_lambda_opt_end_0001:	; new closure is in rax
 	assert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
 	push SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)
