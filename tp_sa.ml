@@ -1,4 +1,5 @@
 #use "reader.ml";;
+open Reader;;
 
 let rec string_of_sexpr = function
 | ScmVoid -> "#<void>"
@@ -311,7 +312,10 @@ let nil_less_scheme_list_to_ocaml lst =
         | _ -> raise (X_syntax "Improper sequence"))
     | ScmPair (ScmSymbol "or", sexprs) ->
                 let sexpr_list_ocaml = nil_less_scheme_list_to_ocaml sexprs in
-                ScmOr (List.map tag_parse sexpr_list_ocaml)
+                (match sexpr_list_ocaml with
+                | [] -> ScmConst (ScmBoolean false)
+                | [var] -> tag_parse var
+                | _ -> ScmOr (List.map tag_parse sexpr_list_ocaml))
     | ScmPair (ScmSymbol "set!", 
                ScmPair (ScmSymbol var,
                         ScmPair (expr, ScmNil))) ->
@@ -929,3 +933,7 @@ let sprint_exprs' chan exprs =
        (List.map string_of_expr' exprs));;
 
 (* end-of-input *)
+
+
+let show str = Semantic_Analysis.semantics
+(Tag_Parser.tag_parse (Reader.nt_sexpr str 0).found);;

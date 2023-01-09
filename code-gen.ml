@@ -497,11 +497,6 @@ module Code_Generation (*: CODE_GENERATION*)= struct
         ^ "\tmov [rax], rbx\n"
         (*^ "\tmov rax, sob_void; don't completely understand if we need to return the address in 
            rax or sob_void\n"*)
-
-
-
-
-
       | ScmBox' _ -> raise (X_this_should_not_happen "'Moshe is taking over the planet using empty boxes")
       | ScmBoxGet' var' ->
          (run params env (ScmVarGet' var'))
