@@ -567,10 +567,7 @@ main:
 	mov r9, COUNT
 	sub r9, 3
 			; calculate initial offset = rbp + 8 * (index - 1) and store at rsi
-	mov rsi, r8
-	dec rsi
-	shl rsi, 3	; 3 left shifts cause (((* 2)* 2)* 2)
-	add rsi, rbp
+	lea rsi, [rbp + 8 * (r8 - 1)]
 .L_lambda_opt_stack_setup_loop_0001:
 	cmp r8, 0
 	je .L_lambda_opt_stack_setup_end_0001
@@ -580,8 +577,7 @@ main:
 	sub rsi, 8
 	jmp .L_lambda_opt_stack_setup_loop_0001
 .L_lambda_opt_stack_setup_end_0001:
-	shl r9, 3	; multiply offset by 8 to get the number of bytes to add to rbp
-	add rbp, r9
+	lea rbp, [rbp + 8 * r9]
 	mov COUNT, 3
 .L_lambda_opt_wrap_things_up_0001:
 	mov rax, qword [rbp + 8 * (4 + 2)] ;'Moshe was in: ScmVarGet' (Var' (v, Param minor))

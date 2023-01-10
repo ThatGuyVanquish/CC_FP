@@ -675,10 +675,7 @@ module Code_Generation (*: CODE_GENERATION*)= struct
         ^ "\tmov r9, COUNT\n"
         ^ (Printf.sprintf "\tsub r9, %d\n" (params_tag_size + 1))
         ^ "\t\t\t; calculate initial offset = rbp + 8 * (index - 1) and store at rsi\n"
-        ^ "\tmov rsi, r8\n"
-        ^ "\tdec rsi\n"
-        ^ "\tshl rsi, 3\t; 3 left shifts cause (((* 2)* 2)* 2)\n"
-        ^ "\tadd rsi, rbp\n"
+        ^ "\tlea rsi, [rbp + 8 * (r8 - 1)]\n"
         ^ (Printf.sprintf "%s:\n" label_stack_setup_loop)
         ^ "\tcmp r8, 0\n"
         ^ (Printf.sprintf "\tje %s\n" label_stack_setup_end)
@@ -689,8 +686,7 @@ module Code_Generation (*: CODE_GENERATION*)= struct
         ^ (Printf.sprintf "\tjmp %s\n" label_stack_setup_loop)
         ^ (Printf.sprintf "%s:\n" label_stack_setup_end)
         (* move the base pointer upwards with the stack *)
-        ^ "\tshl r9, 3\t; multiply offset by 8 to get the number of bytes to add to rbp\n"
-        ^ "\tadd rbp, r9\n"
+        ^ "\tlea rbp, [rbp + 8 * r9]\n"
         (* set the number of parameters to the correct number *)
         ^ (Printf.sprintf "\tmov COUNT, %d\n" (params_tag_size + 1))
 
@@ -713,33 +709,43 @@ module Code_Generation (*: CODE_GENERATION*)= struct
         ^ "\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
         ^ "\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
         ^ "\tcall SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
-      | ScmApplic' (proc, args, Tail_Call) -> raise (X_not_yet_implemented "code_gen scmapplic2")
-        (* let args_code = List.fold_right (fun arg code -> 
+      | ScmApplic' (proc, args, Tail_Call) -> (*raise (X_not_yet_implemented "code_gen scmapplic2")*)
+        let label_stack_fixing_loop = make_make_label ".L_applic_tc_stack_fixing_loop" () in
+        let label_stack_fixing_end = make_make_label ".L_applic_tc_stack_fixing_end" () in
+        let args_code = List.fold_right (fun arg code -> 
           code
           ^(run params env arg)
           ^(Printf.sprintf "\tpush rax;'Moshe was in: ScmApplic' (proc, args, Tail_call)\n")
           ) args  ""  in
         let args_size = List.length args in
-        (* "\tmov rsp, rbp\n"*)
-        (*^*)args_code
+        "\tmov rsp, rbp\n"
+        ^args_code
         ^ (Printf.sprintf "\tpush %d;'Moshe was in: ScmApplic' (proc, args, Tail_call)\n" args_size)
         ^ (run params env proc)
         ^ "\tassert_closure(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n"
-        ^ "\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Non_tail_call)\n"
+        ^ "\tpush SOB_CLOSURE_ENV(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n"
         ^ "\tpush qword [rbp + 8 * 1] ; old ret addr\n"
         ^ "\tpush qword[rbp] ; the old rbp\n"
         (* fix the stack *)
-        ^ "\tmov r8, COUNT\t; r8 holds how many addresses in the stack we need to overwrite\n"
-        ^ "\tadd r8, 4\t; old rbp + ret address + env + params\n"
-        ^ "\tmov r9, r8\n"
-        ^ "\t" *)
-(* 
-
-
-        ^ "\tpop rbp; restore the old rbp\n"
-        ^ "\tjmp SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n" *)
-
-
+        ^ "\tmov r8, COUNT\t; r8 = params of f\n"
+        ^ "\tmov rdi, r8 + 4\t; rdi = offset of the top param in f from the top param in g\n"
+        ^ "\tmov rbp, rsp\t; move rbp to the pseudo rbp of g\n"
+        ^ "\tmov r9, COUNT\t; r9 = params of g\n"
+        ^ "\tmov rsi, r9 + 4\t; rsi = amount of data left to move upwards in the stack\n"
+        ^ "\tlea rbx, [rbp + 8 * (r9 + 3)]\t; rbx is pointing to the current param of g to move up\n"
+        (* loop to move upwards *)
+        ^ (Printf.sprintf "%s:\n" label_stack_fixing_loop)
+        ^ "\tcmp rsi, 0\n"
+        ^ (Printf.sprintf "\tje %s\n" label_stack_fixing_end)
+        ^ "\tmov rcx, [rbx]\n"
+        ^ "\tmov [rbx + 8 * r8], rcx\n"
+        ^ "\tdec rsi\n"
+        ^ "\tsub rbx, 8\n"
+        ^ (Printf.sprintf "\tjmp %s\n" label_stack_fixing_loop)
+        ^ (Printf.sprintf "%s:\n" label_stack_fixing_end)
+        ^ "\tlea rsp, [rsp + 8 * r8]\t; move rsp to the correct position after stack adjustment\n"
+        ^ "\tpop rbp; restore the old rbp as shown in Mayer's lecture\n"
+        ^ "\tjmp SOB_CLOSURE_CODE(rax);'Moshe was in: ScmApplic' (proc, args, Tail_call)\n" 
     and runs params env exprs' =
       List.map
         (fun expr' ->
